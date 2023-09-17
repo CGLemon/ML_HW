@@ -144,11 +144,23 @@ def sex_pie(df):
 
 def main():
     df = transform(pd.read_csv("HW1_data.csv"))
-    df = average(df)
+    print("=========== 題目一 ===========")
+    print(df)
 
+    df = average(df)
+    print("=========== 題目二 ===========")
+    print(df)
+
+    print("=========== 題目三 ===========")
     find_max(df)
+
+    print("=========== 題目四 ===========")
     scatter(df)
+
+    print("=========== 題目五 ===========")
     pie_and_bar(df)
+
+    print("=========== 題目六 ===========")
     sex_pie(df)
 
 if __name__ == '__main__':

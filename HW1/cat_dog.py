@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import os, glob
 
+K=3
 IMGS_ROOT = "images"
 TARGET_SIZE = (64, 64)
 
@@ -39,15 +40,12 @@ def process(img):
     dog_cnt = 0
 
     diff_result.sort(key=lambda x:x[0])
-    K = 3
     for i in range(K):
         _, tag = diff_result[i]
         if tag == "cat":
             cat_cnt += 1
         elif tag == "dog":
             dog_cnt += 1
-
-    # show_img(img)
 
     if cat_cnt > dog_cnt:
         print("It is cat")
@@ -59,6 +57,7 @@ def process(img):
 def main():
     select = None
     while True:
+        print("Please enter a number (1~20).")
         val = input()
         if not val.isnumeric():
             print("Not a nmuber or not integer.")
