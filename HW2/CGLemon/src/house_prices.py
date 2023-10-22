@@ -1,11 +1,13 @@
 import pandas as pd
 import glob, os
-import math
+import math, random
 import numpy as np
 
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+
+import shap
 
 class FullyConnect(nn.Module):
     def __init__(self, in_size,
@@ -25,8 +27,6 @@ class Model(nn.Module):
         self.layers = nn.Sequential(
             FullyConnect(in_size, 512, act=nn.ReLU()),
             FullyConnect(512, 1024, act=nn.ReLU()),
-            # FullyConnect(1024, 2048, act=nn.ReLU()),
-            # FullyConnect(2048, 1024, act=nn.ReLU()),
             FullyConnect(1024, 512, act=nn.ReLU()),
             FullyConnect(512, out_size, act=nn.ReLU())
         )
@@ -173,13 +173,40 @@ def process_df_info(df):
         info.append(result)
     return info
 
+def shuffle(x_chunk, y_chunk):
+    buf = list()
+    for x, y in zip(x_chunk, y_chunk):
+       buf.append((x,y))
+    random.shuffle(buf)
+
+    x_chunk_out, y_chunk_out = list(), list()
+    for x, y in buf:
+        x_chunk_out.append(x)
+        y_chunk_out.append(y)
+    x_chunk_out = np.array(x_chunk_out, dtype=np.float32)
+    y_chunk_out = np.array(y_chunk_out, dtype=np.float32)
+    return x_chunk_out, y_chunk_out
+
 def split(x_chunk, y_chunk, r=0.9):
+    x_chunk, y_chunk = shuffle(x_chunk, y_chunk)
     size = round(len(y_chunk) * r) 
     train_x = x_chunk[:size]
     train_y = y_chunk[:size]
     test_x = x_chunk[size:]
     test_y = y_chunk[size:]
     return train_x, train_y, test_x, test_y
+
+def sperate(x_chunk, features):
+    s = x_chunk.shape[0]
+    n = len(features)
+
+    x_chunk_out = np.zeros( (s, n) )
+
+    for i, x in enumerate(x_chunk):
+        for j, v in enumerate(features):
+            x_chunk_out[i][j] = x[j]
+        if y_chunk is not None:
+    return x_chunk_out
 
 def test_performance(model, loader, device):
     err, cnt = 0, 0
@@ -191,7 +218,7 @@ def test_performance(model, loader, device):
         val = torch.mean(torch.abs(predict - y)).item()
         err += val
         cnt += 1
-    print(err/cnt)
+    print("{:.4f}".format(err/cnt))
 
 def print_results(model, loader, device, dformat):
     pred_result = "Id,SalePrice\n"
@@ -205,54 +232,88 @@ def print_results(model, loader, device, dformat):
     pred_result = pred_result[:-1]
     print(pred_result)
 
-def run(use_gpu, read):
+def shap_explaine(model, x, device):
+    def model_pred(inputs):
+        pred = model(torch.from_numpy(inputs).float().to(device))
+        pred = pred.squeeze(-1)
+        pred = pred.detach().cpu().numpy()
+        return pred
+
+    x100 = shap.utils.sample(x, 100)
+    explainer = shap.Explainer(model_pred, x100)
+    shap_values = explainer(x)
+
+    accm = np.zeros(shap_values[0].values.shape)
+    cnt = 0
+    for v in shap_values:
+        accm += v.values
+        cnt += 1
+    accm /= cnt
+
+    ordered_list = list()
+    for i, val in enumerate(accm):
+        ordered_list.append((i, val))
+
+    ordered_list.sort(key=lambda x: abs(x[1]), reverse=True)
+    top_n = 5
+    best_features = list()
+
+    for i, val in ordered_list[:top_n]:
+        best_features.append(i)
+    return best_features
+
+def train(model, loader, device, max_steps=10000, filename=None):
+    opt = torch.optim.Adam(model.parameters(), lr=0.005)
+    MSE = nn.MSELoss()
+    loss_accm = 0
+
+    num_steps = 0
+    running = True
+
+    model.train()
+    while running:
+        for idx, batch in enumerate(loader):
+            x, y = batch
+            x, y = x.to(device), y.to(device)
+            predict = model(x)
+            loss = MSE(predict, y)
+
+            loss.backward()
+            opt.step()
+            opt.zero_grad()
+
+            num_steps += 1
+            loss_accm += loss.item()
+            if num_steps % 100 == 0:
+                print("{} -> loss: {}".format(num_steps, loss_accm/100))
+                loss_accm = 0
+            if num_steps >= max_steps:
+                running = False
+                break
+    if filename is not None:
+        torch.save(model.to(torch.device("cpu")).state_dict(), filename)
+        model = model.to(device)
+
+def run(use_gpu, train_basic_model, train_special_model):
     train_df, pred_df = load_all_csv()
 
     dformat = get_data_format(process_df_info(train_df))
     x_chunk, y_chunk = transfer_data(train_df, dformat)
     in_size = x_chunk.shape[1]
     train_x, train_y, test_x, test_y = split(x_chunk, y_chunk, r=0.9)
-    model = Model(in_size, 1)
 
     device = torch.device("cpu")
     if use_gpu:
         device = torch.device("cuda")
-        model = model.to(device)
 
-    if not read:
-        opt = torch.optim.Adam(model.parameters(), lr=0.005)
-        MSE = nn.MSELoss()
-        loss_accm = 0
+    model = Model(in_size, 1)
+    model = model.to(device)
 
-        dataset = MyDataset(train_x, train_y)
-        loader = DataLoader(dataset, batch_size=512, num_workers=4, shuffle=True)
+    dataset = MyDataset(train_x, train_y)
+    loader = DataLoader(dataset, batch_size=512, num_workers=4, shuffle=True)
 
-        max_steps = 10000
-        num_steps = 0
-        running = True
-
-        model.train()
-        while running:
-            for idx, batch in enumerate(loader):
-                x, y = batch
-                x, y = x.to(device), y.to(device)
-                predict = model(x)
-                loss = MSE(predict, y)
-
-                loss.backward()
-                opt.step()
-                opt.zero_grad()
-
-                num_steps += 1
-                loss_accm += loss.item()
-                if num_steps % 100 == 0:
-                    print("{} -> loss: {}".format(num_steps, loss_accm/100))
-                    loss_accm = 0
-                if num_steps >= max_steps:
-                    running = False
-                    break
-        torch.save(model.to(torch.device("cpu")).state_dict(), "house_model.pt")
-        model = model.to(device)
+    if train_basic_model:
+        train(model, loader, device, 10000, "house_model.pt")
     else:
         model = model.to(torch.device("cpu"))
         model.load_state_dict(torch.load("house_model.pt"))
@@ -266,8 +327,25 @@ def run(use_gpu, read):
     x_chunk, y_chunk = transfer_data(pred_df, dformat)
     dataset = MyDataset(x_chunk, y_chunk)
     loader = DataLoader(dataset, batch_size=1, num_workers=1, shuffle=False)
-
     print_results(model, loader, device, dformat)
 
+    x_chunk, y_chunk = transfer_data(train_df, dformat)
+    best_features = shap_explaine(model, x_chunk, device)
+
+    model_special = Model(5, 1)
+    model_special = model_special.to(device)
+
+    x_chunk, y_chunk = sperate(x_chunk, y_chunk, best_features)
+    train_x, train_y, test_x, test_y = split(x_chunk, y_chunk, r=0.9)
+    dataset = MyDataset(train_x, train_y)
+    loader = DataLoader(dataset, batch_size=512, num_workers=4, shuffle=True)
+    if train_special_model:
+        train(model_special, loader, device, 2000)
+
+        model_special.eval()
+        dataset = MyDataset(test_x, test_y)
+        loader = DataLoader(dataset, batch_size=32, num_workers=1, shuffle=True)
+        test_performance(model_special, loader, device)
+
 if __name__ == "__main__":
-    run(True, True)
+    run(True, False, False)

@@ -13,7 +13,22 @@ def load_all_csv():
     test_df = pd.read_csv(test_name)
     return train_df, test_df
 
+def shuffle(x_chunk, y_chunk):
+    buf = list()
+    for x, y in zip(x_chunk, y_chunk):
+       buf.append((x,y))
+    random.shuffle(buf)
+
+    x_chunk_out, y_chunk_out = list(), list()
+    for x, y in buf:
+        x_chunk_out.append(x)
+        y_chunk_out.append(y)
+    x_chunk_out = np.array(x_chunk_out, dtype=np.float32)
+    y_chunk_out = np.array(y_chunk_out, dtype=np.int32)
+    return x_chunk_out, y_chunk_out
+
 def split(x_chunk, y_chunk, r=0.9):
+    x_chunk, y_chunk = shuffle(x_chunk, y_chunk)
     size = round(len(y_chunk) * r) 
     train_x = x_chunk[:size]
     train_y = y_chunk[:size]
@@ -47,35 +62,6 @@ def print_results(lr, x_chunk):
         pred_result += "{}\n".format(p)
     pred_result = pred_result[:-1]
     # print(pred_result)
-
-def shuffle(x_chunk, y_chunk):
-    buf = list()
-    for x, y in zip(x_chunk, y_chunk):
-       buf.append((x,y))
-    random.shuffle(buf)
-
-    x_chunk_out, y_chunk_out = list(), list()
-    for x, y in buf:
-        x_chunk_out.append(x)
-        y_chunk_out.append(y)
-    x_chunk_out = np.array(x_chunk_out, dtype=np.float32)
-    y_chunk_out = np.array(y_chunk_out, dtype=np.int32)
-    return x_chunk_out, y_chunk_out
-
-def run():
-    train_df, test_df = load_all_csv()
-    dformat = get_data_format(train_df)
-    x_chunk, y_chunk = transfer_data(train_df, dformat)
-    x_chunk, y_chunk = shuffle(x_chunk, y_chunk)
-
-    train_x, train_y, test_x, test_y = split(x_chunk, y_chunk, r=0.9)
-    lr = LogisticRegression()
-    lr.fit(train_x, train_y)
-
-    test_performance(lr, test_x, test_y)
-
-    x_chunk, _ = transfer_data(test_df, dformat)
-    print_results(lr, x_chunk)
 
 def get_data_format(df):
     dformat = dict()
@@ -124,6 +110,21 @@ def transfer_data(df, dformat):
     x_chunk = np.array(x_chunk, dtype=np.float32)
     y_chunk = np.array(y_chunk, dtype=np.int32)
     return x_chunk, y_chunk
+
+def run():
+    train_df, test_df = load_all_csv()
+    dformat = get_data_format(train_df)
+    x_chunk, y_chunk = transfer_data(train_df, dformat)
+
+    train_x, train_y, test_x, test_y = split(x_chunk, y_chunk, r=0.9)
+    lr = LogisticRegression()
+    lr.fit(train_x, train_y)
+
+    test_performance(lr, test_x, test_y)
+
+    x_chunk, _ = transfer_data(test_df, dformat)
+    print_results(lr, x_chunk)
+
 
 if __name__ == "__main__":
     run()
