@@ -1,7 +1,10 @@
-import os, math
+import os, math, io
 import pandas as pd
 import numpy as np
 import random
+
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 from sklearn.metrics import confusion_matrix
 from sklearn import tree
@@ -40,22 +43,23 @@ def split(x_chunk, y_chunk, r=0.9):
 def test_performance(model, test_x, test_y):
     pred = model.predict(test_x)
 
-    cnt, cor = 0, 0
-    for p, r in zip(pred, test_y):
-        cnt += 1
-        if np.argmax(p) == np.argmax(r):
-            cor += 1
-    print(cor/cnt)
+    arg_p = np.argmax(pred, axis=-1)
+    arg_y = np.argmax(test_y, axis=-1)
 
-    return
+    cor = np.count_nonzero(arg_p == arg_y)
+    cnt = len(arg_p)
+    print("Accurate Rate {:.2f} %".format(100. * cor/cnt))
 
-    # print(test_y)
-    # print(pred)
-    table = confusion_matrix(test_y, pred)
-    print(table)
+    table = confusion_matrix(arg_y, arg_p)
 
-    J = table[0][0]/(table[0][0] + table[0][1]) + table[1][1]/(table[1][0] + table[1][1]) - 1
-    print(J)
+    plt.figure(figsize=(15,8))
+    sns.heatmap(table,square=True,annot=True,fmt='d',linecolor='white',cmap='RdBu',linewidths=1.5,cbar=False)
+    plt.xlabel('Pred',fontsize=20)
+    plt.ylabel('True',fontsize=20)
+    plt.show()
+
+    # J = table[0][0]/(table[0][0] + table[0][1]) + table[1][1]/(table[1][0] + table[1][1]) - 1
+    # print(J)
 
 def print_results(model, x_chunk):
     pred_result = "left\n"
@@ -64,7 +68,11 @@ def print_results(model, x_chunk):
     for p in pred:
         pred_result += "{}\n".format(np.argmax(p))
     pred_result = pred_result[:-1]
-    # print(pred_result)
+
+    df = pd.read_csv(io.StringIO(pred_result), sep=",", header=None)
+    print(df)
+
+    df.to_csv("HW2_hr-analytics_test_sol.csv");
 
 def get_data_format(df):
     dformat = dict()
@@ -174,14 +182,11 @@ def run():
     clf = tree.DecisionTreeClassifier()
     clf.fit(train_x, train_y)
 
-    find_top2(clf, train_x, test_x, features, targets)
-
-
     test_performance(clf, test_x, test_y)
+    find_top2(clf, train_x, test_x, features, targets)
 
     x_chunk, _, _, _ = transfer_data(test_df, dformat)
     print_results(clf, x_chunk)
-
 
 if __name__ == "__main__":
     run()
